@@ -1,0 +1,13 @@
+function [xest] = tsvd(U,S,V,y,k)
+% function [xest] = tsvd(U,S,V,y,k)
+% truncated SVD solver
+
+Vk = V(:,1:k);
+Uk = U(:,1:k);
+Sk = S(1:k,1:k);
+
+xest =  (Vk*(Sk\Uk'))*y(:);
+
+
+
+

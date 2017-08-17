@@ -1,0 +1,8 @@
+load solout230
+
+plot(diag(s))
+xlabel('Singular value index')
+ylabel('Singular values')
+axis tight
+
+export_fig('-pdf','4boxFigs/sv')

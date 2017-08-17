@@ -1,0 +1,161 @@
+% Solves the whole #!
+
+%% Setup
+
+addpath ../utils/
+
+clear
+
+k = [400] % svd truncation parameter
+%GAM = 0.5; % tapering parameter
+
+TSTEP = 200;
+stlims = [-25000 -5000];
+nc = 8; % number of sediment cores
+
+% time axis for the reconstruction
+t = stlims(1):TSTEP:stlims(2);
+nt = length(t);
+
+ntg = 25; % number of time steps in the gn fn vectors
+
+fsp = [1075 1439 1550 821]; % full screen position; for plotting
+
+%% Obtain sediment core records in whole-domain form
+load ../setup/Dlsfile
+
+ld = length(Dwd);
+M = numel(core_order);
+
+% Cholesky decompose the error covariance matrix
+cPm = chol(Pm);
+
+%% Cook up Gbar
+
+load ../setup/gfulls
+
+% obtain the whole-domain design matrix
+nr = length(gfulls)/M;
+Gf = mkG(stlims,TSTEP,gfulls,M,nr);
+ 
+% % correct for different record lengths
+ Gb = Gf(~bv,:);
+
+% weight by Pm
+ Gbp = sparse(cPm\Gb);
+ 
+% use this to unweight the (column scaling in the) solution
+% diagonal of column scaling matrix S
+Sd = 1./sqrt(sum(Gbp.^2,1));
+% diagonal of cholesky decomp of S
+cSd = sqrt(Sd);
+cSd(isnan(cSd) | cSd==inf) = 0;
+
+%save Sd Sd cSd
+
+%lrt = full(sum(Gbp.^2).^(1/4));
+%Gbpc = bsxfun(@times,Gbp,1./lrt);
+%Gbpc(isnan(Gbpc)) = 0;
+
+%load Gbp
+load('Gbpusv_sqrt.mat');
+
+% subselect for the IC problem
+G0 = Gf(:,1:nr*50);
+
+% create the matrix for the IC problem
+% Gf does not have any of the scaling applied in Gbpusv_sqrt
+Gicb = Gf(end-8:end,:);%1:nr*50);
+Gic = nan(M,nr);
+for ii = 1:M
+    Gic(ii,:) = sum(reshape(Gicb(ii,:),nr,[]),2);
+end
+
+% row scaling matrix W
+sig = 0.2; 
+Wd0 = diag(ones(1,nc) * sig); % so long as this is diagonal, row weighting does not matter
+% its Chol
+Wdoc = diag(diag(Wd0).^(1/2));
+% its inverse Cholesky decomposition
+Wdoci = diag(diag(Wd0).^(-1/2));
+Gicw = Wdoci*Gic;
+
+% diagonal of column scaling matrix S
+iSd = 1./sqrt(sum(Gicw.^2,1));
+% diagonal of cholesky decomp of S
+ciSd = sqrt(iSd);
+Gicwc = bsxfun(@times,Gicw,ciSd);
+Gicwc(isnan(Gicwc)) = 0;
+
+%% solve for ICs
+kic = 4;
+ymat = yv2coreswd(Dwd,yil);
+yold = mean(ymat(1:10,:))';
+[uic,sic,vic] = svd(Gicwc);
+yolds = Wdoci*yold;
+[xicu] = tsvd(uic,sic,vic,yolds,kic);
+% unscaling
+xic = ciSd'.*xicu;
+% remember: cSd has some infinite values!
+xicn = xic; xicn(isnan(xicn)) = 0;
+yic = Wdoc*Gicwc*xicu;
+
+% find the soln covariance
+%Mic = vic(:,1:kic)*(sic(1:kic,1:kic)\uic(:,1:kic)')*Wdoc';
+Mic = vic(:,1:kic)*(sic(1:kic,1:kic)\uic(:,1:kic)');
+Cxxicu = Mic*Mic';
+% undo column scaling
+Cxxic = diag(ciSd)*Cxxicu*diag(ciSd);
+Cxxic(isnan(Cxxic)) = 0;
+
+% generate vectors of forward run output at the core locations under a
+% forcing of 5kyr initial conditions followed by 5kyr of nothing
+xic10k = G0*[repmat(xic,25,1);zeros(nr*25,1)];
+
+hl = 25*M;
+xic10k2h = [xic10k(hl+1:end);zeros(hl,1)];
+
+fname = ['icout' num2str(kic)]
+save(fname, 'xic10k2h', 'xic', 'yic', 'yold','sic','uic','vic','kic','Cxxic','ciSd')
+
+%% solve
+yp = cPm\(Dwd-xic10k2h(~bv));
+%[xest] = tsvd(u,s,v,yp,k);
+[xest] = tsvd(u,s,v,yp,k);
+
+% unscaling
+xest = cSd'.*xest;
+% remember: cSd has some infinite values!
+xest(isnan(xest)) = 0;
+
+yest = Gbp*xest;
+yestu = cPm*yest + xic10k2h(~bv);
+
+fname = ['solout',num2str(k)]
+save(fname,'yp', 'xest', 'yest', 'yestu', 's')
+
+% Solution covariance matrix
+% From Wunsch (2006) Eq. 2.293:
+% Cxx = vk*inv(s)*uk'*<n*n'>*uk*inv(s)*vk'
+% Here, I will only compute the diagonal.
+
+% recall that chol(A)'*chol(A) = A.
+
+% Construct the LHS of eq. 2.293
+%M = v(:,1:k)*(s(1:k,1:k)\u(:,1:k)')*cPm';
+% I should not multiply by
+% cPm because I am using the scaled u!
+%M = v(:,1:k)*(s(1:k,1:k)\u(:,1:k)');
+
+% Now compute the diagonal of the covariance matrix
+%Cxx = sum(M.^2,2);
+
+% Undo the column scaling
+%Cxx = Cxx.*Sd';
+
+%fname = ['Cxxout',num2str(k)]
+%save(fname,'Cxx')
+%fname = ['Mout',num2str(k)]
+%save(fname,'M','Sd')
+
+

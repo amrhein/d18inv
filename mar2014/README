@@ -1,0 +1,17 @@
+README
+
+Steps to run the inverse model:
+
+SETUP
+1. Run csadj.m to generate adjoing Green's functions for each sediment core. This takes about 30 min per core on glacier.
+
+2. Run saveDls.m. This interpolates data and constructs covariance matrices and saves them in Dlsfile.mat
+
+3. Run mkfulls.m. This generate a precursor for mkG.
+
+4. Run saveGbpusv.m. This computes and saves the singular vectors of the scaled G matrix (called by saveGbpusv.m) in file Gbpusv.mat.
+
+RUN
+1. Run ssvd.m. This takes an effective range parameter k specified in the code.
+
+ANALYSIS

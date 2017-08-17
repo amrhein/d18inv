@@ -1,0 +1,84 @@
+k = 230;
+lname = ['nhout',num2str(k)];
+load(lname)
+addpath ../../../export_fig
+%% make plots
+% Remember that for independent Gaussian RVs, the variances add,
+% not the standard deviations!
+tis = [-25000:200:-5400]; % shorter time
+wc = [1 1 1];
+
+% NH
+figure(1)
+clf
+hold on
+ciplot(nh-sqrt(nhne.^2+nhse.^2),nh+sqrt(nhne.^2+nhse.^2),tis,0.9*wc);
+ciplot(nh-sqrt(nhneb.^2+nhse.^2),nh+sqrt(nhneb.^2+nhse.^2),tis,0.8*wc);
+ciplot(nh-nhse,nh+nhse,tis,0.7*wc)
+plot(tis,nh,'k')
+grid
+%export_fig('-pdf',['Figs/nhavgs_whole_hemis_',num2str(k)])
+set(gcf,'color','w')
+
+% SH
+figure(2)
+clf
+hold on
+ciplot(sh-sqrt(shne.^2+shse.^2),sh+sqrt(shne.^2+shse.^2),tis,0.9*wc);
+ciplot(sh-sqrt(shneb.^2+shse.^2),sh+sqrt(shneb.^2+shse.^2),tis,0.8*wc);
+ciplot(sh-shse,sh+shse,tis,0.7*wc)
+plot(tis,sh,'k')
+grid
+%export_fig('-pdf',['Figs/nhavgs_whole_hemis_',num2str(k)])
+set(gcf,'color','w')
+
+% both
+% NH
+figure(4)
+clf
+hold on
+plot(tis,nh,'r')
+plot(tis,sh,'b')
+hl = legend('North Atlantic','Southern Ocean');
+set(hl,'box','off')
+wcb = [1 1 0];
+ciplot(sh-sqrt(shneb.^2+shse.^2),sh+sqrt(shneb.^2+shse.^2),tis,wc-0.2*wcb);
+ciplot(sh-sqrt(shne.^2+shse.^2),sh+sqrt(shne.^2+shse.^2),tis,wc-0.3*wcb);
+ciplot(sh-shse,sh+shse,tis,wc-0.4*wcb)
+
+wcm = [0 1 1];
+ciplot(nh-sqrt(nhneb.^2+nhse.^2),nh+sqrt(nhneb.^2+nhse.^2),tis,wc-0.2*wcm);
+ciplot(nh-sqrt(nhne.^2+nhse.^2),nh+sqrt(nhne.^2+nhse.^2),tis,wc-0.3*wcm);
+ciplot(nh-nhse,nh+nhse,tis,wc-0.4*wcm)
+
+plot(tis,sh,'b')
+plot(tis,nh,'r')
+
+set(gcf,'color','w','position',[551   256   422   208])
+set(gca,'xtick',[-25000:5000:-5000]);
+set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+%grid
+xlabel('Time (years)')
+%ylabel('Equilibrium calcite, \delta^1^8O_c')
+ylabel({['\delta^1^8O_c anomalies'],['(permil PDB)']})
+export_fig('-pdf',['Figs/nhavgs_nh&sh_',num2str(k)])
+
+% Differences
+%figure(3)
+%clf
+%hold on
+%ciplot(dest-sqrt(dne.^2+dese.^2),dest+sqrt(dne.^2+dese.^2),tis,0.9*wc);
+%ciplot(dest-sqrt(dneb.^2+dese.^2),dest+sqrt(dneb.^2+dese.^2),tis,0.8*wc);
+%ciplot(dest-dese,dest+dese,tis,0.7*wc)
+%plot(tis,dest,'k')
+%set(gcf,'color','w')
+%set(gca,'xtick',[-25000:5000:-5000]);
+%set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+
+%grid
+%xlabel('Time (yrs)')
+%ylabel('Difference in equilibrium calcite, \delta^1^8O_c')
+%export_fig('-pdf',['Figs/nhavgs_diff_',num2str(k)])
+% if i wanted to stack the error bars rather than adding their variances:
+%ciplot(dest-sqrt(diag(mb2d))-dese,dest+sqrt(diag(mb2d))+dese,tis,0.8*wc);
+

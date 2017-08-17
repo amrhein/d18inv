@@ -1,0 +1,485 @@
+% nhavgswd
+% this is a whale of a script
+
+%% Setup
+clear
+close all
+
+k = 230; % k' used in ssvd
+%km = 99; % k' used in the overdetermined problem of estimating NH
+          % and SH means (or really, over any region as specified below)
+
+nr = 2806; %number of surface regions
+nto = 101; % number of reconstruction times
+nt = 99; % number of times considered here. the last 2 are in the nullspace.
+addpath ../../../export_fig
+
+fl = ['solout',num2str(k)];
+load(fl)
+
+load ../../tmi/c_all_4deg.mat
+load ../../tmi/tracerobs_4deg_33lev_woce.mat
+
+xestmat = reshape(xest,2806,[]);
+xestmat(:,nt+1:nto) = [];
+
+[lonmg,latmg] = meshgrid(2:4:358,-90:4:88);
+
+addpath ../utils/
+addpath ../analysis/
+
+%% Define some regions. In reginds, the northern box is in column 1
+%% and the southern in column 2.
+
+indmap = plotsurf(0*var(xestmat')); close
+indmap(~isnan(indmap)) = 1:2806;
+reginds = false(2806,2);
+
+% Define the Northern box
+
+% a small high-latitude box:
+nb = indmap(~isnan(indmap) & (latmg>=46 & latmg<80) & ((lonmg>=0 & lonmg<=30) | (lonmg>=290 & lonmg<=360)));
+
+% the whole NH
+%nb = indmap(~isnan(indmap) & latmg>0);
+
+% north of 45
+%nb = indmap(~isnan(indmap) & latmg>60);
+
+% a single location
+%nb = indmap(~isnan(indmap) & latmg == 70 & lonmg==2);
+
+reginds(nb,1 ) = 1;
+plotsurf(reginds(:,1));
+
+% Define the Southern box
+
+% a small high-latitude box:
+%sb = indmap(~isnan(indmap) & (latmg>=-84 & latmg<-60) & ((lonmg>=0 & lonmg<=30) | (lonmg>=290 & lonmg<=360)));
+
+% the whole SH
+%sb = indmap(~isnan(indmap) & latmg<0);
+
+% south of -60
+sb = indmap(~isnan(indmap) & latmg<-60);
+load sb
+
+% a single location
+%sb = indmap(~isnan(indmap) & latmg == -70 & lonmg==2);
+
+reginds(sb,2) = 1;
+plotsurf(reginds(:,2));
+
+% index the regions in the new dimension. the number nns is the new
+% spatial dimension of the problem
+nsinds = reginds;
+rib = logical(sum(reginds,2)); %places/times for either region
+nsinds(~rib,:) = [];
+nns = sum(reginds(:));
+
+% Define the area-weighting matrix
+
+lat2806w =  abs(cos(pi/180*latmg(~isnan(indmap))));
+% the diagonal:
+awdz = (rib.*lat2806w); % need to remove zeros to get to the right length
+awd = awdz;
+awd(~awd) = [];
+awd = ones(size(awd)); %this is the case without area weighting
+                       %awd = awd/sum(awd)*length(awd);
+
+%% Load M
+load Gbpusv_sqrt
+Ma = v(:,1:k)*(s(1:k,1:k)\u(:,1:k)');
+% eliminate the last two points
+M = Ma;
+M((end-2*nr+1):end,:) = [];
+clear Ma;
+
+[r c] = size(M);
+
+% load the problem column scaling matrix
+load Sd
+% generate some useful inverses and the versions of the weights
+% that omit the last two times
+Sda = Sd;
+Sda((end-2*nr+1):end) = [];
+cSda = cSd;
+cSda((end-2*nr+1):end) = [];
+ciSd = 1./cSd;
+ciSd(ciSd==inf) = 0;
+ciSda = 1./cSda;
+ciSda(ciSda==inf) = 0;
+
+% Rescale M from the solution of the last problem
+Mr = reshape(bsxfun(@times,M,cSda'),2806,[]);
+
+% Construct the design matrix
+md = sparse(logical(kron(eye(nt),nsinds)));
+
+% A non-statistical row weighting to account for different
+% gridpoint areas
+% awdic is the diagonal inverse cholesky decmp
+awdic = repmat(sqrt(1./awd),nt,1);
+mda = bsxfun(@times,awdic,md);
+
+% Derive the covariance matrix factors for the two regions...
+Mrns = Mr(rib,:);
+Mns = reshape(Mrns,[],c);
+% Weight the covariance factor by the area weighting vector
+% (effecting a left multiplication by the inverse chol descomp)
+Mnsa = bsxfun(@times,Mns,awdic);
+
+% Find the svd of Mns*Mns' to generate its eigenvectors
+[q,r] = qr(Mnsa,0);
+[um sm ~] = svd(r*r');
+e = q*um; % left singular vectors = eigenvectors
+ke = min(k,min(size(e)));
+er = e(:,1:ke); % others are 0 within eps
+
+% Project the problem onto its range vectors
+rrib = repmat(rib,nt,1); % all times and locs in the reduced
+                         % regional problem
+
+% This doesn't work! the subset of v does not provide a complete basis.
+%rrib0 = logical([rrib;zeros(2*2806,1)]);
+%er = v(logical(rrib0),1:k);
+
+% These are the elements of xest that fall in both regions; they
+% are the 'data' in this case. This is a disordered vector of NH
+% and SH; the indices determining which is which are in nsinds.
+xestns = reshape(xestmat(rib,:),[],1);
+% Area weighting of rows
+xestna = awdic.*xestns;
+
+% DEA 15 July: do I want to normalize this way?? doesn't it make
+% sense to have higher variance there?
+% Now normalize the design matrix so  that the region with more points
+% doesn't have artificially high variance:
+mSd = 1./sqrt(sum(mda.^2,1));
+% diagonal of cholesky decomp of S
+mcSd = sqrt(mSd);
+mcSd(isnan(mcSd) | mcSd==inf) = 0;
+% apply the column scaling the design matrix
+mds = sparse(mda*diag(mcSd));
+
+% Right now the problem is huge. However, we can project the
+% eigenvectors of the covariance matrix onto the problem:
+y = er'*xestna;
+E = er'*mds;
+
+% row weighting matrix given by the inverse cholesky decomposition
+% of the singular values sm
+W = sm(1:ke,1:ke);
+%W = (Mnsa'*v(logical(rrib0),1:k))'*(Mnsa'*v(logical(rrib0),1:k));
+Wic = chol(inv(W));
+
+%
+km = 198;
+[uM sM vM] = svd(Wic*E);
+uMk = uM(:,1:km);
+sMk = sM(1:km,1:km);
+vMk = vM(:,1:km);
+mestu = tsvd(uM,sM,vM,Wic*y,km);
+mest = diag(mcSd)*mestu; % undoing column scaling
+nh = mest(1:2:end); % start at one because the first row of nsinds
+                    % indexes points that constrain the NH
+sh = mest(2:2:end);
+time = -25000:200:-5000;
+
+% soln covariance
+Cmm = diag(mcSd)*vMk*inv(sMk)*uMk'*uMk*inv(sMk)*vMk'*diag(mcSd)';
+% standard errors
+dcmm = diag(Cmm);
+nhse = sqrt(dcmm(1:2:end));
+shse = sqrt(dcmm(2:2:end));
+
+
+% Now for the difference of the problem.
+Dt = sparse(nt*2,nt);
+for ii = 1:nt
+    rint = (ii-1)*2+1;
+    Dt(rint,ii) = 1;
+    Dt(rint+1,ii) = -1;
+end
+D = Dt';
+
+d = D*mest;
+Cdd = D*Cmm*D';
+Cddc = chol(Cdd);
+
+% Now the problem is just-determined and the unweighted design
+% matrix is just identity. After weighting, it is inv(Cyyc).
+%
+kd = 99;
+[ud sd vd] = svd(inv(Cddc));
+udk = ud(:,1:kd);
+sdk = sd(1:kd,1:kd);
+vdk = vd(:,1:kd);
+dest = tsvd(ud,sd,vd,inv(Cddc)*d,kd);
+%Cdede = vdk*inv(sdk)*udk'*Cdd*udk*inv(sdk)*vdk';
+% no column scaling to undo here
+Cdede = vdk*inv(sdk)*udk'*udk*inv(sdk)*vdk';
+dese = sqrt(diag(Cdede));
+
+%% Exercise as a sanity check
+% When the two regions are single points, the inferred nh and sh
+% means should just give the same values and uncertainties as for
+% the original two points! assuming the regions have been thus
+% assigned, compare the output in figure 2 to the following:
+
+%figure(3)
+% NB: the indices for xestns are not automatically 1 and 2 for NH
+% and SH, respectively - it depends on the ordering of xestns!
+%nh1 = xestns(2:2:end);
+%sh1 = xestns(1:2:end);
+%Cns = Mns*Mns';
+%Cnsd = diag(Cns);
+%nhse1 = sqrt(Cnsd(2:2:end));
+%shse1 = sqrt(Cnsd(1:2:end));
+%clf
+%hold all
+%errorbar(nh1,nhse1)
+%errorbar(sh1,shse1)
+%legend('nh','sh')
+%title('sanity check')
+
+%% Resolution!
+% the mean operator:
+mo = diag(mcSd)*vMk*(sMk\uMk')*Wic*er';
+mo = bsxfun(@times,mo,awdic');
+
+% generate the column scaling from the big problem that has the
+% length of this reduced problem:
+cSdr = cSd(rrib);
+ciSdr = ciSd(rrib);
+
+% Make a matrix that has the effect of subsampling the entire
+% domain in the way that we are. This is necessary for relating the
+% global Tv to the sampling operator mo.
+
+moa = sparse(nt*2,nr*nt);
+moa(:,rrib) = mo;
+
+mda = sparse(logical(kron(eye(nt),reginds)));
+
+% Now generate MTv
+
+mdsv = moa*(bsxfun(@times,cSda',v(1:nr*nt,1:k)));
+mdsvv = mdsv*(bsxfun(@times,ciSda',v(1:nr*nt,1:k)))';
+mdsvvmm = (mda*diag(1./sum(mda)))'-mdsvv;
+m2 = mdsvvmm*mdsvvmm';
+
+% Sanity check: the first should produce the inferred means, and
+% that latter should have similar order of magnitude (it's the
+% straight average).
+
+%clf
+%hold all
+%plot(moa*xest(1:nr*nt))
+%plot((mda*diag(1./sum(mda)))'*xest(1:nr*nt))
+
+% now for the case that is completely spatially covarying within
+% the two regions. This can be efficiently computed and stored by
+% factoring into two parts. kron tiles this matrix, and the
+% covariance matrix (which we never need to compute) is mbf*mbf'.
+
+% first compute the locations of both hemis
+nbh = indmap(~isnan(indmap) & latmg>0);
+sbh = indmap(~isnan(indmap) & latmg<0);
+
+regindsh(nbh,1 ) = 1;
+regindsh(sbh,2 ) = 1;
+
+% a nice trick for generating a left factor of the matrix:
+mbf = sparse(logical(kron(eye(nt),regindsh)));
+mmbf = mdsvvmm*mbf;
+mb2 = mmbf*mmbf';
+
+% Now compute the time covariance matrix of the interhemispheric
+% differences for the two prior covariances.
+
+mb2d = D*mb2*D';
+m2d = D*m2*D';
+
+% nullspace standard errors
+nhne = sqrt(diag(m2(1:2:end,1:2:end)));
+shne = sqrt(diag(m2(2:2:end,2:2:end)));
+nhneb = sqrt(diag(mb2(1:2:end,1:2:end)));
+shneb = sqrt(diag(mb2(2:2:end,2:2:end)));
+dne = sqrt(diag(m2d));
+dneb = sqrt(diag(mb2d));
+
+%% make plots
+% Remember that for independent Gaussian RVs, the variances add,
+% not the standard deviations!
+tis = [-25000:200:-5400]; % shorter time
+wc = [1 1 1];
+
+% NH
+figure(1)
+clf
+hold on
+ciplot(nh-sqrt(nhne.^2+nhse.^2),nh+sqrt(nhne.^2+nhse.^2),tis,0.9*wc);
+ciplot(nh-sqrt(nhneb.^2+nhse.^2),nh+sqrt(nhneb.^2+nhse.^2),tis,0.8*wc);
+ciplot(nh-nhse,nh+nhse,tis,0.7*wc)
+plot(tis,nh,'k')
+grid
+%export_fig('-pdf',['Figs/nhavgs_whole_hemis_',num2str(k)])
+set(gcf,'color','w')
+
+% SH
+figure(2)
+clf
+hold on
+ciplot(sh-sqrt(shne.^2+shse.^2),sh+sqrt(shne.^2+shse.^2),tis,0.9*wc);
+ciplot(sh-sqrt(shneb.^2+shse.^2),sh+sqrt(shneb.^2+shse.^2),tis,0.8*wc);
+ciplot(sh-shse,sh+shse,tis,0.7*wc)
+plot(tis,sh,'k')
+grid
+%export_fig('-pdf',['Figs/nhavgs_whole_hemis_',num2str(k)])
+set(gcf,'color','w')
+
+% both
+% NH
+figure(4)
+clf
+hold on
+plot(tis,nh,'r')
+plot(tis,sh,'b')
+legend('North Atlantic','Southern Ocean')
+wcb = [1 1 0];
+ciplot(sh-sqrt(shneb.^2+shse.^2),sh+sqrt(shneb.^2+shse.^2),tis,wc-0.2*wcb);
+ciplot(sh-sqrt(shne.^2+shse.^2),sh+sqrt(shne.^2+shse.^2),tis,wc-0.3*wcb);
+ciplot(sh-shse,sh+shse,tis,wc-0.4*wcb)
+
+wcm = [0 1 1];
+ciplot(nh-sqrt(nhneb.^2+nhse.^2),nh+sqrt(nhneb.^2+nhse.^2),tis,wc-0.2*wcm);
+ciplot(nh-sqrt(nhne.^2+nhse.^2),nh+sqrt(nhne.^2+nhse.^2),tis,wc-0.3*wcm);
+ciplot(nh-nhse,nh+nhse,tis,wc-0.4*wcm)
+
+plot(tis,sh,'b')
+plot(tis,nh,'r')
+
+set(gcf,'color','w')
+set(gca,'xtick',[-25000:5000:-5000]);
+set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+grid
+xlabel('Time (yrs)')
+ylabel('Equilibrium calcite, \delta^1^8O_c')
+export_fig('-pdf',['Figs/nhavgs_nh&sh_',num2str(k)])
+
+% Differences
+figure(3)
+clf
+hold on
+ciplot(dest-sqrt(dne.^2+dese.^2),dest+sqrt(dne.^2+dese.^2),tis,0.9*wc);
+ciplot(dest-sqrt(dneb.^2+dese.^2),dest+sqrt(dneb.^2+dese.^2),tis,0.8*wc);
+ciplot(dest-dese,dest+dese,tis,0.7*wc)
+plot(tis,dest,'k')
+set(gcf,'color','w')
+set(gca,'xtick',[-25000:5000:-5000]);
+set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+grid
+xlabel('Time (yrs)')
+ylabel('Difference in equilibrium calcite, \delta^1^8O_c')
+export_fig('-pdf',['Figs/nhavgs_diff_',num2str(k)])
+% if i wanted to stack the error bars rather than adding their variances:
+%ciplot(dest-sqrt(diag(mb2d))-dese,dest+sqrt(diag(mb2d))+dese,tis,0.8*wc);
+
+%% spectra
+
+% of differences
+% white noise about 0 case
+Rd = m2d(50,1:end);
+%dftRd = abs(fftshift(fft(Rd)));
+dftRd = abs((fft(Rd)));
+% both regions white about same
+Rbd = mb2d(50,1:end);
+%dftRbd = abs(fftshift(fft(Rbd)));
+dftRbd = abs((fft(Rbd)));
+% solution covariance
+Rc = Cdd(50,1:end);
+%dftRc = abs(fftshift(fft(Rc)));
+dftRc = abs((fft(Rc)));
+
+% of SH
+% white noise about 0 case
+Rdn = m2(50,1:2:end);
+%dftRdn = abs(fftshift(fft(Rdn)));
+dftRdn = abs((fft(Rdn)));
+% both regions white about same
+Rbdn = mb2(50,1:2:end);
+%dftRbdn = abs(fftshift(fft(Rbdn)));
+dftRbdn = abs((fft(Rbdn)));
+% solution covariance
+Rcn = Cmm(50,1:2:end);
+%dftRcn = abs(fftshift(fft(Rcn)));
+dftRcn = abs((fft(Rcn)));
+
+% of SH
+% white noise about 0 case
+clf
+Rds = m2(50,2:2:end);
+%dftRds = abs(fftshift(fft(Rds)));
+dftRds = abs((fft(Rds)));
+% both regions white about same
+Rbds = mb2(50,2:2:end);
+%dftRbds = abs(fftshift(fft(Rbds)));
+dftRbds = abs((fft(Rbds)));
+% solution covariance
+Rcs = Cmm(50,2:2:end);
+%dftRcs = abs(fftshift(fft(Rcs)));
+dftRcs = abs((fft(Rcs)));
+
+
+Fs = 1/200;
+%freq = 0:Fs/length(Rxx):Fs/2-(Fs/length(Rxx));
+freq = 0:Fs/length(Rcs):Fs/2;
+%per0 = [1./freq(2:end),0];
+per0 = freq;
+
+subplot(2,2,1)
+plot(per0,dftRdn(1:50),per0,dftRbdn(1:50),per0,dftRcn(1:50))
+title('NH')
+set(gca,'xtick',[1/20000,1/1000,1/500,1/400])
+set(gca,'xticklabel',{'20000','1000','500','400'})
+%axis tight
+xlim([0,1/400])
+ylabel('Power spectral density (permil^2)')
+grid
+xlabel('Period (years)')
+%plot(per0,dftRdn(1:50),per0,dftRbdn(1:50),per0,dftRcn(1:50))
+
+subplot(2,2,2)
+plot(per0,dftRds(1:50),per0,dftRbds(1:50),per0,dftRcs(1:50))
+set(gca,'xtick',[1/20000,1/1000,1/500,1/400])
+set(gca,'xticklabel',{'20000','1000','500','400'})
+%axis tight
+xlim([0,1/400])
+ylabel('Power spectral density (permil^2)')
+xlabel('Period (years)')
+grid
+title('SH')
+
+subplot(2,2,3)
+plot(per0,dftRd(1:50),per0,dftRbd(1:50),per0,dftRc(1:50))
+title('NH-SH difference')
+set(gca,'xtick',[1/20000,1/1000,1/500,1/400])
+set(gca,'xticklabel',{'20000','1000','500','400'})
+%axis tight
+xlim([0,1/400])
+ylabel('Power spectral density (permil^2)')
+xlabel('Period (years)')
+grid
+%set(gca,'xticklabel',{'Inf','10000','15000','20000','25000'})
+h = legend('Nullspace - white noise','Nullspace - hemispheric coherence', ...
+       'Solution covariance');
+set(gcf,'position',[510   364   560   420])
+set(h,'position',[0.55 0.3 0.4 0.14],'box','off')
+
+export_fig('-pdf',['Figs/unc_spectra' num2str(k)])
+
+%% save output
+fn = ['nhout',num2str(k)];
+save(fn,'nh','sh','tis','nhse','shse','nhne','shne','nhneb','shneb','dne','dneb')
+

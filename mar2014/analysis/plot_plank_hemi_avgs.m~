@@ -1,0 +1,228 @@
+% a script to plot the planktonic data
+
+clear
+
+addpath ../utils
+addpath ~/export_fig
+cores = dir('../../data/plank/*.mat');
+%load nhout230
+load ../../tmi/tracerobs_4deg_33lev_woce
+
+LIMS = [-25000,-5000];
+
+% initialize interp'd time series matrix
+tp = -25000:200:-5000;
+ltp = length(tp);
+lc = length(cores);
+
+nhyi = [];
+nhPd = [];
+shyi = [];
+shPd = [];
+nnv = {};
+snv = {};
+
+nii = 1;
+sii = 1;
+
+for ii = 1:lc
+    eval(['load ../../data/plank/' cores((ii)).name ';']);
+    name = strrep(cores((ii)).name,'.mat','')
+    eval(['species=' name '.species' ';'])
+    eval(['data=' name '.data' ';'])
+    eval(['lat=' name '.lat' ';'])
+    eval(['lon=' name '.lon' ';'])
+    eval(['depth=' name '.depth' ';'])
+
+
+    data(:,2) = -data(:,2);
+    data = flipud(data);
+    if all(isnan(data(:,2)))
+        continue
+    elseif max(abs(data(:,2)))<1000
+        data(:,2) = 1000*data(:,2);
+    end
+
+     data(~~sum(data(:,5)<-8,2),:) = nan;
+    
+   % all times and data
+   ta = data(:,2);
+   ya = data(:,5);
+
+    % eliminate multiple measurements at the same time (the result of
+    % samples at the same depth) by using the average
+    
+    allreps = [];
+    for i2 = 1:length(ta)
+        repinds = find(ta==ta(i2));
+        ya(repinds) = mean(ya(repinds));
+        if numel(repinds)>1, allreps = [allreps;repinds(2:end)]; end
+    end
+    ya(unique(allreps)) = [];
+    ta(unique(allreps)) = [];
+
+    %   N = 0.2^2*eye(length(ta));
+
+    %try
+    %[yi,P,S,ym,yms] = lsinterp(ya,ta,tp,N);
+    %catch 
+    %keyboard
+    %end
+
+   % just deglacial
+   %keyboard
+   tdgi = (ta>=-26000 & ta<-4000);
+   t = ta(tdgi);
+   y = ya(tdgi);
+
+   tp = -26000:-4000;
+   yi = interp1(t,y,tp);
+
+   yis = conv(yi,ones(200,1)/200,'same'); %smoothed
+   yiss = yis(1:200:end); % subsampled
+
+   yii = yiss(6:(end-5));
+
+   % exception for MD95-2010, which ends early but is a great
+   % record - to compute the mean, pretend that the last value
+   % persists until the end of the reconstruction interval
+   if strcmp(name,'MD95_2010')
+       yiim = yii-(nansum(yii)+sum(isnan(yii))*yii(find(isnan(yii),1)-1))/length(yii);
+   else
+       yiim = yii-nanmean(yii);
+   end
+   if lat<0
+       shyi = [shyi,yiim(:)];
+       snv{sii} = char(name);
+       sii = sii+1;
+  else
+      nhyi = [nhyi,yiim(:)];
+      nnv{nii} = char(name);
+      nii = nii+1;
+   end
+end
+
+% Now compute the means and error bars at each time.
+mnhyi = nanmean(nhyi');
+snhyi = nanstd(nhyi');
+
+mshyi = nanmean(shyi');
+sshyi = nanstd(shyi');
+
+close all
+
+tpp = [-25000:200:-5000];
+
+figure(1)
+clf
+hold on
+ciplot_hvo(mnhyi-snhyi,mnhyi+snhyi,tpp,0.8*ones(1,3))
+plot(tpp,nhyi)
+plot(tpp,mnhyi,'k','linewidth',2)
+hl = legend(nnv);
+%set(hl,'interpreter','none','box','off')
+axis tight
+set(gca,'ytick',-1.5:.5:1.5)
+set(hl,'interpreter','none','box','off','location','eastoutside')
+set(gcf,'color','w','position',[551   256   422   208])
+set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+xlabel('Time (years)')
+ylabel({['\delta^1^8O_c anomaly'],['(permil VPDB)']})
+export_fig('-pdf','Figs/plank_NH_avg')
+
+figure(2)
+clf
+hold on
+ciplot_hvo(mshyi-sshyi,mshyi+sshyi,tpp,0.8*ones(1,3))
+plot(tpp,shyi)
+plot(tpp,mshyi,'k','linewidth',2)
+hl = legend(snv);
+axis tight
+set(gca,'ytick',-1.5:.5:1.5)
+set(hl,'interpreter','none','box','off','location','eastoutside')
+set(gcf,'color','w','position',[551   256   422   208])
+set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+xlabel('Time (years)')
+ylabel({['\delta^1^8O_c anomaly'],['(permil VPDB)']})
+export_fig('-pdf','Figs/plank_SH_avg')
+
+%for ii = 1:length(tp)
+    %Rnn = diag(
+load nhout230.mat
+k = 230;
+tis = [-25000:200:-5400]; % shorter time
+wc = [1 1 1];
+wcb = [1 1 0];
+wcm = [0 1 1];
+
+%%
+figure(3)
+clf
+hold on
+ciplot_hvo(mnhyi-snhyi,mnhyi+snhyi,tpp,wc-0.2*wcm)
+ciplot_hvo(nh-sqrt(nhne.^2+nhse.^2),nh+sqrt(nhne.^2+nhse.^2),tis,wc-0.2*wcb);
+plot(tpp,mnhyi,'r','linewidth',1)
+plot(tis,nh,'linewidth',1)
+%plot(tpp,mnhyi-snhyi,'r','linewidth',1)
+%plot(tpp,mnhyi+snhyi,'r','linewidth',1)
+%plot(tis,nh-sqrt(nhne.^2+nhse.^2),'linewidth',1)
+%plot(tis,nh+sqrt(nhne.^2+nhse.^2),'linewidth',1)
+%plot(tpp,mnhyi,'k','linewidth',2)
+hl = legend('$m_{NH}^p$','$m_{NA}$','interpreter','latex')
+set(hl,'interpreter','none','box','off','location','southwest')
+axis tight
+set(gca,'ytick',-1.5:.5:1.5)
+set(gcf,'color','w','position',[551   256   422   208])
+set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+xlabel('Time (yrs)')
+ylabel({['\delta^1^8O_c anomalies'],['(permil PDB)']})
+text(-14000,1,'Northern Hemisphere')
+export_fig('-pdf','Figs/NA_avg_compare2')
+%export_fig('-eps','Figs/NA_avg_compare')
+
+figure(4)
+clf
+hold on
+ciplot_hvo(mshyi-sshyi,mshyi+sshyi,tpp,wc-0.2*wcm)
+ciplot_hvo(sh-sqrt(shne.^2+shse.^2),sh+sqrt(shne.^2+shse.^2),tis,wc-0.2*wcb);
+plot(tpp,mshyi,'r','linewidth',1)
+plot(tis,sh,'linewidth',1)
+%plot(tpp,mshyi-sshyi,'r','linewidth',1)
+%plot(tpp,mshyi+sshyi,'r','linewidth',1)
+%plot(tis,sh-sqrt(shne.^2+shse.^2),'linewidth',1)
+%plot(tis,sh+sqrt(shne.^2+shse.^2),'linewidth',1)
+%plot(tpp,mnhyi,'k','linewidth',2)
+hl = legend('$m^p_{SH}','m_{SO}')
+set(hl,'interpreter','none','box','off','location','southwest')
+axis tight
+set(gca,'ytick',-1.5:.5:1.5)
+set(gcf,'color','w','position',[551   256   422   208])
+set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+xlabel('Time (yrs)')
+ylabel({['\delta^1^8O_c anomaly'],['(permil PDB)']})
+text(-14000,1,'Southern Hemisphere')
+export_fig('-pdf','Figs/SO_avg_compare2')
+%export_fig('-eps','Figs/SO_avg_compare')
+
+%ciplot_hvo(mshyi-sshyi,mshyi+sshyi,tpp,wc-0.2*wcm);
+%ciplot(sh-sqrt(shneb.^2+shse.^2),sh+sqrt(shneb.^2+shse.^2),tis,wc-0.2*wcb);
+%plot(tpp,mshyi,'k','linewidth',2)
+%plot(tpp(1:end-2),sh)
+%set(hl,'interpreter','none','box','off')
+%axis tight
+%set(gcf,'color','w','position',[551   256   422   208])
+%set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+%xlabel('Time (yrs)')
+%ylabel('\delta^1^8O_c')
+
+
+%set(gca,'xticklabel',{'-25000','-20000','-15000','-10000','-5000'})
+%xlabel('time (yrs)')
+%ylabel('\delta^1^8O_c')
+%grid
+%set(gcf,'color','w','position',[748   -18   361   802])
+
+
+
+
+
